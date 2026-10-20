@@ -6,10 +6,20 @@ def apply_design():
     st.markdown(
         """
         <style>
+        :root {
+            --sage: #788b70;
+            --sage-dark: #65755d;
+            --sage-light: #e6eadf;
+            --cream: #f7f3ed;
+            --brown: #3f3028;
+            --muted: #806e62;
+            --border: #cdbdad;
+        }
 
         .stApp {
-            background: #f7f3ed;
-            color: #3f3028;
+            background: var(--cream);
+            color: var(--brown);
+            --primary-color: var(--sage-dark);
         }
 
         .main .block-container {
@@ -19,7 +29,7 @@ def apply_design():
         }
 
         h1, h2, h3 {
-            color: #3f3028;
+            color: var(--brown);
             letter-spacing: -0.02em;
         }
 
@@ -32,23 +42,23 @@ def apply_design():
             font-weight: 700;
             letter-spacing: -0.05em;
             margin-bottom: 0;
-            color: #3f3028;
+            color: var(--brown);
         }
 
         .cadence-tagline {
             font-size: 1.05rem;
-            color: #806e62;
+            color: var(--muted);
             margin-top: -0.2rem;
             margin-bottom: 0.3rem;
         }
 
         .cadence-subtitle {
             font-size: 0.95rem;
-            color: #806e62;
+            color: var(--muted);
             margin-bottom: 2rem;
         }
 
-        .section-number {
+        .section-number, .schedule-number {
             font-size: 0.75rem;
             font-weight: 700;
             letter-spacing: 0.12em;
@@ -59,7 +69,7 @@ def apply_design():
         .section-title {
             font-size: 1.45rem;
             font-weight: 650;
-            color: #3f3028;
+            color: var(--brown);
             margin-top: 0.15rem;
         }
 
@@ -68,61 +78,23 @@ def apply_design():
             font-size: 0.88rem;
         }
 
-        .reality-box {
-            background: #eee7de;
-            border-left: 4px solid #9a806f;
-            padding: 1rem 1.1rem;
-            border-radius: 0.25rem;
-            line-height: 1.6;
-            color: #514139;
-        }
-
-        .research-box {
-            background: #eee7de;
-            padding: 1.25rem;
-            border-radius: 0.35rem;
-            margin-top: 1rem;
-        }
-
-        .research-label {
-            font-size: 0.72rem;
-            font-weight: 700;
-            letter-spacing: 0.1em;
-            color: #9a806f;
-            text-transform: uppercase;
-            margin-bottom: 0.4rem;
-        }
-
-        .plan-box {
-            background: #eee7de;
-            padding: 1.25rem;
-            border-radius: 0.35rem;
-            line-height: 1.6;
-        }
-
+        .reality-box, .research-box, .plan-box, .schedule-box,
         .confirmation-box {
             background: #eee7de;
-            border-left: 4px solid #65755d;
-            padding: 1.25rem;
-            border-radius: 0.25rem;
+            padding: 1.15rem;
+            border-radius: 0.35rem;
             line-height: 1.6;
-            color: #514139;
             margin-top: 1rem;
-            margin-bottom: 1rem;
         }
 
-        .confirmation-title {
-            font-size: 0.72rem;
-            font-weight: 700;
-            letter-spacing: 0.1em;
-            color: #65755d;
-            text-transform: uppercase;
-            margin-bottom: 0.45rem;
+        .reality-box, .confirmation-box {
+            border-left: 4px solid var(--sage);
+            color: #514139;
         }
 
         .confirmed-box {
-            background: #e6eadf;
-            border-left: 4px solid #65755d;
+            background: var(--sage-light);
+            border-left: 4px solid var(--sage-dark);
             padding: 1.25rem;
             border-radius: 0.25rem;
             line-height: 1.6;
@@ -130,75 +102,51 @@ def apply_design():
             margin-top: 1rem;
         }
 
-        .confirmed-title {
+        .research-label, .confirmation-title, .confirmed-title {
             font-size: 0.72rem;
             font-weight: 700;
             letter-spacing: 0.1em;
-            color: #65755d;
+            color: var(--sage-dark);
             text-transform: uppercase;
             margin-bottom: 0.45rem;
         }
 
         .schedule-box {
-            background: #eee7de;
-            padding: 1rem 1.15rem;
-            border-radius: 0.35rem;
             margin-bottom: 0.7rem;
         }
 
         .schedule-date {
             font-weight: 700;
-            color: #3f3028;
+            color: var(--brown);
         }
 
         .schedule-duration {
-            color: #806e62;
+            color: var(--muted);
             font-size: 0.9rem;
         }
 
-        .schedule-number {
-            color: #9a806f;
-            font-size: 0.75rem;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-        }
-
-        .status-behind {
-            color: #8b5e4b;
-            font-weight: 700;
-            letter-spacing: 0.06em;
-        }
-
-        .status-on-track {
-            color: #65755d;
-            font-weight: 700;
-            letter-spacing: 0.06em;
-        }
-
-        .status-within-range {
-            color: #8a725f;
-            font-weight: 700;
-            letter-spacing: 0.06em;
-        }
-
+        .status-behind, .status-on-track, .status-within-range,
         .status-complete {
-            color: #65755d;
             font-weight: 700;
             letter-spacing: 0.06em;
         }
+
+        .status-behind { color: #8b5e4b; }
+        .status-on-track, .status-complete { color: var(--sage-dark); }
+        .status-within-range { color: #8a725f; }
 
         .path-line {
             height: 3px;
             background: #cdbdad;
             position: relative;
-            margin: 1.5rem 25px 0.5rem 25px;
+            margin: 1.5rem 25px 0.5rem;
         }
 
         .path-dot {
             width: 14px;
             height: 14px;
             border-radius: 50%;
-            background: #6f5849;
+            background: var(--sage);
             position: absolute;
             top: -5px;
             left: 0;
@@ -208,8 +156,8 @@ def apply_design():
             width: 18px;
             height: 18px;
             border-radius: 50%;
-            border: 3px solid #6f5849;
-            background: #f7f3ed;
+            border: 3px solid var(--sage-dark);
+            background: var(--cream);
             position: absolute;
             top: -7px;
             right: 0;
@@ -238,30 +186,70 @@ def apply_design():
             padding: 1rem;
         }
 
-        div[data-testid="stMetricLabel"] {
-            color: #806e62;
+        div[data-testid="stMetricLabel"] { color: var(--muted); }
+        div[data-testid="stMetricValue"] { color: var(--brown); }
+
+        /* Main buttons: no red hover */
+        .stButton > button,
+        .stFormSubmitButton > button {
+            border-radius: 0.4rem;
+            border: 1px solid var(--sage);
+            background: var(--sage);
+            color: #ffffff;
+            transition: background 0.15s ease, border-color 0.15s ease;
         }
 
-        div[data-testid="stMetricValue"] {
-            color: #3f3028;
+        .stButton > button:hover,
+        .stFormSubmitButton > button:hover {
+            background: var(--sage-dark) !important;
+            border-color: var(--sage-dark) !important;
+            color: #ffffff !important;
         }
 
-        .stButton > button {
-            border-radius: 0.35rem;
-            border: 1px solid #bca898;
-            background: #f7f3ed;
-            color: #4b392f;
+        .stButton > button:focus,
+        .stFormSubmitButton > button:focus {
+            border-color: var(--sage-dark) !important;
+            box-shadow: 0 0 0 0.15rem #788b7040 !important;
+            color: #ffffff !important;
         }
 
-        .stButton > button:hover {
-            border-color: #806653;
-            color: #3f3028;
-        }
-
+        /* Inputs and dropdowns */
         div[data-baseweb="input"] > div,
         div[data-baseweb="select"] > div {
             background: #fbf9f6;
-            border-color: #cdbdad;
+            border-color: var(--border);
+        }
+
+        /* Study-day multiselect chips */
+        span[data-baseweb="tag"] {
+            background: var(--sage-light) !important;
+            border-color: var(--sage) !important;
+            color: var(--brown) !important;
+        }
+
+        span[data-baseweb="tag"] * {
+            color: var(--brown) !important;
+        }
+
+        /* Sliders and progress indicators */
+        div[data-testid="stSlider"] [role="slider"] {
+            background: var(--sage-dark) !important;
+            border-color: var(--sage-dark) !important;
+        }
+
+        div[data-testid="stSlider"] [data-baseweb="slider"] > div > div {
+            background: var(--sage) !important;
+        }
+
+        div[data-testid="stProgress"] > div > div {
+            background: var(--sage) !important;
+        }
+
+        /* Focused controls */
+        div[data-baseweb="input"] > div:focus-within,
+        div[data-baseweb="select"] > div:focus-within {
+            border-color: var(--sage-dark) !important;
+            box-shadow: 0 0 0 1px var(--sage-dark) !important;
         }
 
         </style>
