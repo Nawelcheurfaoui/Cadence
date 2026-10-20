@@ -1,9 +1,9 @@
+
 import os
 import re
 import json
 from pathlib import Path
 from datetime import date, timedelta
-import webbrowser
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -12,6 +12,8 @@ from tavily import TavilyClient
 
 from design import apply_design
 from languages import LANGUAGE_CONFIG, CEFR_LEVELS
+
+
 # ============================================================
 # SETUP
 # ============================================================
@@ -19,18 +21,11 @@ from languages import LANGUAGE_CONFIG, CEFR_LEVELS
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
-
 PLAN_FILE = BASE_DIR / "confirmed_plan.json"
 
 
 def save_confirmed_plan(plan):
-
-    with open(
-        PLAN_FILE,
-        "w",
-        encoding="utf-8",
-    ) as file:
-
+    with open(PLAN_FILE, "w", encoding="utf-8") as file:
         json.dump(
             plan,
             file,
@@ -38,13 +33,15 @@ def save_confirmed_plan(plan):
             ensure_ascii=False,
             default=str,
         )
+
+
 st.set_page_config(
     page_title="Cadence",
     page_icon="◌",
     layout="centered",
 )
-apply_design()
 
+apply_design()
 
 
 # ============================================================
@@ -89,13 +86,8 @@ if "plan_inputs" not in st.session_state:
 
 
 # ============================================================
-# RESEARCH AGENT
-# ============================================================
-
-# ============================================================
 # OFFICIAL WORKLOAD RESEARCH
 # ============================================================
-
 
 def research_workload(
     language,
@@ -103,11 +95,11 @@ def research_workload(
     target_level,
 ):
     """
-    Researches official workload evidence for the requested
+    Researches workload evidence for the requested
     language-level transition.
 
     Cadence calculates the trajectory.
-    Groq only researches and interprets the external evidence.
+    Groq researches and interprets external evidence.
     """
 
     groq_api_key = os.getenv("GROQ_API_KEY")
@@ -138,10 +130,7 @@ def research_workload(
     groq_client = Groq(api_key=groq_api_key)
     tavily_client = TavilyClient(api_key=tavily_api_key)
 
-    language_config = LANGUAGE_CONFIG.get(
-        language,
-        {},
-    )
+    language_config = LANGUAGE_CONFIG.get(language, {})
 
     research_hint = language_config.get(
         "research_hint",
@@ -205,7 +194,6 @@ Return exactly this structure:
 }}
 """
 
-
     try:
         search_response = tavily_client.search(
             query=query,
@@ -265,15 +253,13 @@ Return exactly this structure:
             "Groq returned an empty research result."
         )
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # PARSE JSON
-    # ========================================================
+    # --------------------------------------------------------
 
     text = raw_text.strip()
 
     if text.startswith("```"):
-
         text = re.sub(
             r"^```(?:json)?\s*",
             "",
@@ -288,22 +274,18 @@ Return exactly this structure:
         )
 
     try:
-
-        research = json.loads(
-            text
-        )
+        research = json.loads(text)
 
     except json.JSONDecodeError as error:
-
         raise RuntimeError(
             "Groq returned invalid JSON.\n\n"
             f"{raw_text}\n\n"
             f"JSON error: {error}"
         )
 
-    # ========================================================
+    # --------------------------------------------------------
     # VALIDATE REQUIRED FIELDS
-    # ========================================================
+    # --------------------------------------------------------
 
     required_fields = [
         "evidence_type",
@@ -323,57 +305,34 @@ Return exactly this structure:
     ]
 
     if missing_fields:
-
         raise RuntimeError(
             "Groq research is missing required fields: "
             + ", ".join(missing_fields)
         )
 
-    # ========================================================
+    # --------------------------------------------------------
     # NORMALIZE VALUES
-    # ========================================================
+    # --------------------------------------------------------
 
     evidence_type = str(
         research["evidence_type"]
     ).strip().upper()
 
-    if evidence_type not in {
-        "DIRECT",
-        "DERIVED",
-    }:
-
+    if evidence_type not in {"DIRECT", "DERIVED"}:
         raise RuntimeError(
             "Groq returned an invalid evidence type."
         )
 
-    source = str(
-        research["source"]
-    ).strip()
-
-    source_url = str(
-        research["source_url"]
-    ).strip()
-
-    reason = str(
-        research["reason"]
-    ).strip()
-
-    evidence = str(
-        research["evidence"]
-    ).strip()
+    source = str(research["source"]).strip()
+    source_url = str(research["source_url"]).strip()
+    reason = str(research["reason"]).strip()
+    evidence = str(research["evidence"]).strip()
 
     try:
-
-        low_hours = float(
-            research["low_hours"]
-        )
-
-        estimate_hours = float(
-            research["estimate_hours"]
-        )
+        low_hours = float(research["low_hours"])
+        estimate_hours = float(research["estimate_hours"])
 
     except (TypeError, ValueError):
-
         raise RuntimeError(
             "Groq returned invalid workload numbers."
         )
@@ -381,69 +340,50 @@ Return exactly this structure:
     high_value = research["high_hours"]
 
     if high_value is None:
-
         high_hours = None
-
     else:
-
         try:
-
-            high_hours = float(
-                high_value
-            )
+            high_hours = float(high_value)
 
         except (TypeError, ValueError):
-
             raise RuntimeError(
                 "Groq returned an invalid HIGH_HOURS value."
             )
 
-    # ========================================================
+    # --------------------------------------------------------
     # VALIDATE WORKLOAD
-    # ========================================================
+    # --------------------------------------------------------
 
     if low_hours < 0:
-
         raise RuntimeError(
             "LOW_HOURS cannot be negative."
         )
 
     if estimate_hours < 0:
-
         raise RuntimeError(
             "ESTIMATE_HOURS cannot be negative."
         )
 
     if high_hours is not None:
-
         if high_hours < low_hours:
-
             raise RuntimeError(
                 "HIGH_HOURS cannot be below LOW_HOURS."
             )
 
-        if not (
-            low_hours
-            <= estimate_hours
-            <= high_hours
-        ):
-
+        if not low_hours <= estimate_hours <= high_hours:
             raise RuntimeError(
                 "ESTIMATE_HOURS must be within "
                 "the researched workload range."
             )
 
-    else:
+    elif estimate_hours < low_hours:
+        raise RuntimeError(
+            "ESTIMATE_HOURS cannot be below LOW_HOURS."
+        )
 
-        if estimate_hours < low_hours:
-
-            raise RuntimeError(
-                "ESTIMATE_HOURS cannot be below LOW_HOURS."
-            )
-
-    # ========================================================
+    # --------------------------------------------------------
     # RETURN CLEAN RESEARCH RESULT
-    # ========================================================
+    # --------------------------------------------------------
 
     return {
         "evidence_type": evidence_type,
@@ -456,6 +396,8 @@ Return exactly this structure:
         "evidence": evidence,
         "raw_text": raw_text,
     }
+
+
 # ============================================================
 # SET YOUR LANGUAGE GOAL
 # ============================================================
@@ -475,14 +417,13 @@ st.caption(
 # LANGUAGE
 # ============================================================
 
-language_options = [
-    "Choose a language"
-] + list(
+language_options = ["Choose a language"] + list(
     LANGUAGE_CONFIG.keys()
 )
 
 st.markdown(
-    '<div style="font-size: 18px; font-weight: 600;">Which language are you learning?</div>',
+    '<div style="font-size: 18px; font-weight: 600;">'
+    "Which language are you learning?</div>",
     unsafe_allow_html=True,
 )
 
@@ -520,12 +461,11 @@ selected_days = []
 
 if language != "Choose a language":
 
-    available_levels = LANGUAGE_CONFIG[
-        language
-    ]["levels"]
+    available_levels = LANGUAGE_CONFIG[language]["levels"]
 
     st.markdown(
-        '<div style="font-size: 18px; font-weight: 600;">Where are you starting?</div>',
+        '<div style="font-size: 18px; font-weight: 600;">'
+        "Where are you starting?</div>",
         unsafe_allow_html=True,
     )
 
@@ -541,11 +481,7 @@ if language != "Choose a language":
         key="cadence_current_level",
     )
 
-    if (
-        current_level
-        and current_level != "Choose your current level"
-    ):
-
+    if current_level and current_level != "Choose your current level":
         current_goal = current_level
 
 
@@ -559,29 +495,23 @@ if (
     and current_level != "Choose your current level"
 ):
 
-    level_order = LANGUAGE_CONFIG[
-        language
-    ]["levels"]
+    level_order = LANGUAGE_CONFIG[language]["levels"]
 
     try:
-
-        current_index = level_order.index(
-            current_level
-        )
+        current_index = level_order.index(current_level)
 
         valid_target_levels = [
             level
             for level in level_order
-            if level_order.index(level)
-            > current_index
+            if level_order.index(level) > current_index
         ]
 
     except ValueError:
-
         valid_target_levels = []
 
     st.markdown(
-        '<div style="font-size: 18px; font-weight: 600;">Where do you want to reach?</div>',
+        '<div style="font-size: 18px; font-weight: 600;">'
+        "Where do you want to reach?</div>",
         unsafe_allow_html=True,
     )
 
@@ -597,11 +527,7 @@ if (
         key="cadence_target_level",
     )
 
-    if (
-        target_level
-        and target_level != "Choose your target level"
-    ):
-
+    if target_level and target_level != "Choose your target level":
         target_goal = target_level
 
 
@@ -609,13 +535,11 @@ if (
 # DEADLINE
 # ============================================================
 
-if (
-    target_goal
-    and target_goal != "Choose your target level"
-):
+if target_goal and target_goal != "Choose your target level":
 
     st.markdown(
-        '<div style="font-size: 18px; font-weight: 600;">When do you want to reach it?</div>',
+        '<div style="font-size: 18px; font-weight: 600;">'
+        "When do you want to reach it?</div>",
         unsafe_allow_html=True,
     )
 
@@ -636,7 +560,8 @@ if (
 if deadline:
 
     st.markdown(
-        '<div style="font-size: 18px; font-weight: 600;">When do you start studying?</div>',
+        '<div style="font-size: 18px; font-weight: 600;">'
+        "When do you start studying?</div>",
         unsafe_allow_html=True,
     )
 
@@ -658,7 +583,8 @@ if deadline:
 if start_date:
 
     st.markdown(
-        '<div style="font-size: 18px; font-weight: 600;">How long is one study session?</div>',
+        '<div style="font-size: 18px; font-weight: 600;">'
+        "How long is one study session?</div>",
         unsafe_allow_html=True,
     )
 
@@ -693,7 +619,8 @@ if (
 ):
 
     st.markdown(
-        '<div style="font-size: 18px; font-weight: 600;">How many sessions can you study per week?</div>',
+        '<div style="font-size: 18px; font-weight: 600;">'
+        "How many sessions can you study per week?</div>",
         unsafe_allow_html=True,
     )
 
@@ -732,7 +659,8 @@ if (
     if sessions_number_preview > 0:
 
         st.markdown(
-            '<div style="font-size: 18px; font-weight: 600;">Which days do you study?</div>',
+            '<div style="font-size: 18px; font-weight: 600;">'
+            "Which days do you study?</div>",
             unsafe_allow_html=True,
         )
 
@@ -748,16 +676,13 @@ if (
 
         selected_days = st.multiselect(
             "Study days",
-            list(
-                weekday_options.keys()
-            ),
+            list(weekday_options.keys()),
             max_selections=sessions_number_preview,
             key="cadence_study_days",
             label_visibility="collapsed",
         )
 
         if len(selected_days) < sessions_number_preview:
-
             st.caption(
                 f"Choose {sessions_number_preview} "
                 f"study days to match your "
@@ -766,7 +691,6 @@ if (
             )
 
     else:
-
         st.caption(
             "Your current capacity is zero sessions per week."
         )
@@ -795,36 +719,23 @@ valid_schedule_inputs = True
 
 if ready_for_plan:
 
-    hours_number = float(
-        hours_per_session.split()[0]
-    )
+    hours_number = float(hours_per_session.split()[0])
+    sessions_number = int(sessions_per_week.split()[0])
 
-    sessions_number = int(
-        sessions_per_week.split()[0]
-    )
-
-    weekly_hours = (
-        hours_number
-        * sessions_number
-    )
+    weekly_hours = hours_number * sessions_number
 
     if start_date > deadline:
-
         st.error(
             "Your start date must be before your deadline."
         )
-
         valid_schedule_inputs = False
 
     if sessions_number > 0:
-
         if len(selected_days) != sessions_number:
-
             st.warning(
                 f"Choose exactly {sessions_number} "
                 f"study days before creating the plan."
             )
-
             valid_schedule_inputs = False
 
 
@@ -838,8 +749,7 @@ if ready_for_plan and valid_schedule_inputs:
     )
 
     st.write(
-        f"**{language}** · "
-        f"{current_level} → {target_level}"
+        f"**{language}** · {current_level} → {target_level}"
     )
 
     st.write(
@@ -859,7 +769,6 @@ if ready_for_plan and valid_schedule_inputs:
     )
 
     if selected_days:
-
         st.write(
             "Study days: **"
             + ", ".join(selected_days)
@@ -878,12 +787,8 @@ if ready_for_plan and valid_schedule_inputs:
 
     if create_plan:
 
-        # The goal is now derived from the structured
-        # language-level information.
-
         goal = (
-            f"{language} "
-            f"{current_level} → {target_level}"
+            f"{language} {current_level} → {target_level}"
         )
 
         st.session_state.plan_inputs = {
@@ -906,32 +811,31 @@ if ready_for_plan and valid_schedule_inputs:
         with st.spinner(
             "Cadence is researching the official workload..."
         ):
-        
-                try:
-                    research = research_workload(
-                        language,
-                        current_level,
-                        target_level,
-                    )
+            try:
+                research = research_workload(
+                    language,
+                    current_level,
+                    target_level,
+                )
 
-                    st.session_state.research = research
-                    st.session_state.plan_created = True
+                st.session_state.research = research
+                st.session_state.plan_created = True
 
-                except Exception as error:
-                    st.error(
-                        "Cadence could not complete the live workload research."
-                    )
+            except Exception as error:
+                st.error(
+                    "Cadence could not complete the live workload research."
+                )
 
-                    st.warning(
-                        "Live research is temporarily unavailable. "
-                        "Please try again later."
-                    )
+                st.warning(
+                    "Live research is temporarily unavailable. "
+                    "Please try again later."
+                )
 
-                    st.caption(f"Technical detail: {error}")
+                st.caption(f"Technical detail: {error}")
 
 
 # ============================================================
-# PLAN
+# COMPACT, VISUAL RESULTS
 # ============================================================
 
 if (
@@ -957,9 +861,9 @@ if (
     weekly_hours = inputs["weekly_hours"]
     selected_days = inputs["selected_days"]
 
-    # ========================================================
-    # RESEARCH WORKLOAD
-    # ========================================================
+    # --------------------------------------------------------
+    # RESEARCHED WORKLOAD
+    # --------------------------------------------------------
 
     workload = max(
         float(research["estimate_hours"]),
@@ -971,7 +875,6 @@ if (
         0.0,
     )
 
-
     high_value = research["high_hours"]
 
     if high_value is None:
@@ -982,11 +885,9 @@ if (
             low_workload,
         )
 
-
-
-    # ========================================================
-    # TRAJECTORY
-    # ========================================================
+    # --------------------------------------------------------
+    # TIME REMAINING AND REQUIRED PACE
+    # --------------------------------------------------------
 
     today = date.today()
 
@@ -995,36 +896,17 @@ if (
         0,
     )
 
-    weeks_remaining = (
-        days_remaining / 7
-        if days_remaining > 0
-        else 0
-    )
-
-    remaining_work = workload
+    weeks_remaining = days_remaining / 7
 
     if weeks_remaining > 0:
-
-        low_required_pace = (
-            low_workload
-            / weeks_remaining
-        )
-
-        estimate_required_pace = (
-            workload
-            / weeks_remaining
-        )
+        low_required_pace = low_workload / weeks_remaining
+        estimate_required_pace = workload / weeks_remaining
 
         if high_workload is not None:
-            high_required_pace = (
-                high_workload
-                / weeks_remaining
-            )
+            high_required_pace = high_workload / weeks_remaining
         else:
             high_required_pace = None
-
     else:
-
         low_required_pace = float("inf")
         estimate_required_pace = float("inf")
         high_required_pace = None
@@ -1047,49 +929,33 @@ if (
     else:
         high_gap = None
 
-
-
-    # ========================================================
+    # --------------------------------------------------------
     # TRAJECTORY STATUS
-    # ========================================================
+    # --------------------------------------------------------
 
-    if remaining_work <= 0:
-
+    if workload <= 0:
         trajectory = "COMPLETE"
-
+    elif weeks_remaining <= 0:
+        trajectory = "BELOW RANGE"
     elif weekly_hours >= estimate_required_pace:
-
         trajectory = "ON TRACK"
-
-    elif (
-        low_required_pace > 0
-        and weekly_hours >= low_required_pace
-    ):
-
+    elif weekly_hours >= low_required_pace:
         trajectory = "WITHIN RANGE"
-
     else:
-
         trajectory = "BELOW RANGE"
 
-    # ========================================================
+    # --------------------------------------------------------
     # TIME AT CURRENT CAPACITY
-    # ========================================================
+    # --------------------------------------------------------
 
     if weekly_hours > 0:
-
-        weeks_at_capacity = (
-            remaining_work
-            / weekly_hours
-        )
-
+        weeks_at_capacity = workload / weekly_hours
     else:
-
         weeks_at_capacity = float("inf")
 
-    # ========================================================
+    # --------------------------------------------------------
     # ACTUAL SESSION SCHEDULE
-    # ========================================================
+    # --------------------------------------------------------
 
     weekday_options = {
         "Monday": 0,
@@ -1123,17 +989,12 @@ if (
         )
 
         remaining_session_hours = (
-            workload
-            - (
-                full_sessions
-                * hours_per_session
-            )
+            workload - full_sessions * hours_per_session
         )
 
         total_sessions = full_sessions
 
         if remaining_session_hours > 0:
-
             total_sessions += 1
 
         while (
@@ -1141,24 +1002,16 @@ if (
             and current_date <= deadline
         ):
 
-            if (
-                current_date.weekday()
-                in selected_weekdays
-            ):
+            if current_date.weekday() in selected_weekdays:
 
-                session_number = (
-                    len(schedule) + 1
-                )
+                session_number = len(schedule) + 1
 
                 if (
                     session_number == total_sessions
                     and remaining_session_hours > 0
                 ):
-
                     duration = remaining_session_hours
-
                 else:
-
                     duration = hours_per_session
 
                 schedule.append(
@@ -1171,286 +1024,219 @@ if (
 
             current_date += timedelta(days=1)
 
-    # ========================================================
-    # RESEARCH
-    # ========================================================
+    # --------------------------------------------------------
+    # MAIN VERDICT
+    # --------------------------------------------------------
 
-    st.divider()
-
-    st.markdown(
-        '<div class="section-number">'
-        "Research"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    if research["evidence_type"] == "DIRECT":
-
-        research_label = (
-            "Direct official workload evidence"
-        )
-
+    if trajectory == "COMPLETE":
+        status_title = "Workload completed"
+        status_icon = "✓"
+    elif trajectory == "ON TRACK":
+        status_title = "On track"
+        status_icon = "✓"
+    elif trajectory == "WITHIN RANGE":
+        status_title = "At risk"
+        status_icon = "!"
     else:
+        status_title = "Behind schedule"
+        status_icon = "!"
 
-        research_label = (
-            "Official cumulative level evidence"
-        )
-
-    st.markdown(
-        f"""
-        <div class="research-box">
-
-        <div class="research-label">
-        {research_label}
-        </div>
-
-        <strong>
-        {language}: {current_level} → {target_level}
-        </strong>
-
-        <br><br>
-
-        {research["reason"]}
-
-        <br><br>
-
-        <strong>Evidence:</strong>
-
-        {research["evidence"]}
-
-        <br><br>
-
-        <span class="small-muted">
-        Source: {research["source"]}
-        </span>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.link_button(
-        "View official source",
-        research["source_url"],
-    )
-
-    # ========================================================
-    # REALITY CHECK
-    # ========================================================
+    if weeks_remaining > 0:
+        required_hours_per_week = workload / weeks_remaining
+    else:
+        required_hours_per_week = float("inf")
 
     st.divider()
 
-    st.markdown(
-        '<div class="section-number">'
-        "03 · Reality Check"
-        "</div>",
-        unsafe_allow_html=True,
+    st.caption(
+        f"{language.upper()} · {current_level} → {target_level}"
     )
 
-    col1, col2 = st.columns(2)
+    st.subheader(f"{status_icon} {status_title}")
+
+    st.caption(
+        f"Deadline: {deadline.strftime('%d %B %Y')}"
+    )
+
+    # --------------------------------------------------------
+    # KEY NUMBERS
+    # --------------------------------------------------------
+
+    col1, col2, col3 = st.columns(3)
 
     with col1:
-
         st.metric(
-            "Time remaining",
-            (
-                f"{weeks_remaining:.1f} weeks"
-                if weeks_remaining > 0
-                else "Deadline reached"
-            ),
+            "Your pace",
+            f"{weekly_hours:g} h/wk",
         )
 
     with col2:
-
         st.metric(
-            "Working estimate",
+            "Time available",
+            f"{weeks_remaining:.1f} weeks",
+        )
+
+    with col3:
+        st.metric(
+            "Workload estimate",
             f"{workload:g} hours",
         )
 
+    # --------------------------------------------------------
+    # VISUAL TIME COMPARISON
+    # --------------------------------------------------------
+
+    st.markdown("**Estimated time needed**")
+
     if weekly_hours > 0:
-
-        reality = (
-            f"At your current capacity, the working "
-            f"estimate would take about "
-            f"{weeks_at_capacity:.1f} weeks."
+        st.write(
+            f"{weeks_at_capacity:.1f} weeks at your current pace"
         )
-
     else:
-
-        reality = (
-            "Your current capacity is zero hours per week."
+        st.write(
+            "Your current pace cannot complete the workload."
         )
 
-    st.html(
-        f"""
-        <div class="reality-box">
-            {reality}
-        </div>
-        """
-    )
+    if weeks_at_capacity > 0 and weeks_remaining > 0:
 
-    # ========================================================
-    # TRAJECTORY
-    # ========================================================
-
-    st.divider()
-
-    st.markdown(
-        '<div class="section-number">'
-        "04 · Trajectory"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '<div class="section-title">'
-        "Where your current pace leads"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    if trajectory == "ON TRACK":
-
-        trajectory_text = (
-            f"Your current pace of {weekly_hours:g} hours "
-            f"per week meets the working estimate required "
-            f"to move from {current_level} to {target_level} "
-            f"by your deadline."
+        time_coverage = min(
+            weeks_remaining / weeks_at_capacity,
+            1.0,
         )
 
-    elif trajectory == "WITHIN RANGE":
+        st.progress(time_coverage)
 
-        trajectory_text = (
-            f"Your current pace reaches the lower end of "
-            f"the researched workload. The working estimate "
-            f"requires about {estimate_gap:.1f} additional "
-            f"hours per week."
-        )
-
-    elif trajectory == "BELOW RANGE":
-
-        trajectory_text = (
-            f"Your current pace of {weekly_hours:g} hours "
-            f"per week is below the lower end of the "
-            f"researched workload."
-        )
-
-    else:
-
-        trajectory_text = (
-            "The researched workload has been completed."
-        )
-
-    st.html(
-        f"""
-        <div class="plan-box">
-            {trajectory_text}
-        </div>
-        """
-    )
-
-    # ========================================================
-    # PLAN
-    # ========================================================
-
-    st.divider()
-
-    st.markdown(
-        '<div class="section-number">'
-        "05 · Plan"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '<div class="section-title">'
-        "Your current plan"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    if trajectory == "ON TRACK":
-
-        plan_text = (
-            f"Study {hours_per_session:g} hours per session "
-            f"across {sessions_per_week} sessions per week. "
-            f"That gives you {weekly_hours:g} hours per week "
-            f"toward {target_level}."
-        )
-
-    elif trajectory == "WITHIN RANGE":
-
-        plan_text = (
-            f"Your current schedule provides "
-            f"{weekly_hours:g} hours per week. "
-            f"It reaches the lower end of the researched "
-            f"workload, but the working estimate would "
-            f"require approximately "
-            f"{estimate_required_pace:.1f} hours per week."
-        )
-
-    elif trajectory == "BELOW RANGE":
-
-        plan_text = (
-            f"Your current schedule provides "
-            f"{weekly_hours:g} hours per week, which is below "
-            f"the researched workload required for this "
-            f"level transition."
-        )
-
-    else:
-
-        plan_text = (
-            "The researched workload has been completed."
-        )
-
-    st.html(
-        f"""
-        <div class="plan-box">
-            {plan_text}
-        </div>
-        """
-    )
-
-    # ========================================================
-    # SCHEDULE PREVIEW
-    # ========================================================
-
-    if schedule:
-
-        st.markdown(
-            '<div class="section-title">'
-            "Schedule preview"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
-        schedule_preview = []
-
-        for session in schedule[:10]:
-
-            schedule_preview.append(
-                {
-                    "Session": session["session"],
-                    "Date": session["date"].strftime(
-                        "%d %B %Y"
-                    ),
-                    "Hours": round(
-                        session["duration"],
-                        2,
-                    ),
-                }
+        if weeks_at_capacity > weeks_remaining:
+            st.caption(
+                "Your available time is shorter than the "
+                "estimated time needed."
+            )
+        else:
+            st.caption(
+                "Your available time covers the working estimate."
             )
 
-        st.dataframe(
-            schedule_preview,
-            use_container_width=True,
-            hide_index=True,
+    elif trajectory == "COMPLETE":
+        st.caption(
+            "The researched workload is marked complete."
+        )
+    else:
+        st.caption(
+            "There is no time remaining before the deadline."
         )
 
-        if len(schedule) > 10:
+    # --------------------------------------------------------
+    # ONE ACTIONABLE RECOMMENDATION
+    # --------------------------------------------------------
+
+    st.markdown("### Your next move")
+
+    if trajectory == "COMPLETE":
+
+        st.write(
+            "Review your progress and confirm whether you have "
+            "reached your target level."
+        )
+
+    elif weeks_remaining <= 0:
+
+        st.write(
+            "Your deadline has arrived. Set a new deadline "
+            "to calculate a new trajectory."
+        )
+
+    elif weekly_hours >= required_hours_per_week:
+
+        st.write(
+            "Keep your current study pace and review your "
+            "progress regularly."
+        )
+
+    else:
+
+        st.write(
+            f"To meet the {workload:g}-hour working estimate, "
+            f"aim for about {required_hours_per_week:.1f} "
+            f"study hours per week, instead of "
+            f"{weekly_hours:g}."
+        )
+
+    st.caption(
+        "This is an estimate based on researched workload. "
+        "Actual progress varies by learner and study quality."
+    )
+
+    # --------------------------------------------------------
+    # OPTIONAL RESEARCH DETAILS
+    # --------------------------------------------------------
+
+    with st.expander("Research evidence and source"):
+
+        if research["evidence_type"] == "DIRECT":
+            st.caption("Direct workload evidence")
+        else:
+            st.caption("Derived from cumulative level evidence")
+
+        st.write(research["reason"])
+        st.write("**Evidence:**", research["evidence"])
+        st.write("**Source:**", research["source"])
+
+        if research["source_url"].startswith(("https://", "http://")):
+            st.link_button(
+                "View source",
+                research["source_url"],
+            )
+
+        if high_workload is not None:
+            st.caption(
+                f"Researched range: {low_workload:g}–"
+                f"{high_workload:g} hours."
+            )
+        else:
+            st.caption(
+                f"Available workload figure: {low_workload:g} hours."
+            )
+
+    # --------------------------------------------------------
+    # OPTIONAL STUDY SCHEDULE
+    # --------------------------------------------------------
+
+    with st.expander("View study schedule"):
+
+        if schedule:
+
+            schedule_preview = [
+                {
+                    "Session": session["session"],
+                    "Date": session["date"].strftime("%d %B %Y"),
+                    "Hours": round(session["duration"], 2),
+                }
+                for session in schedule
+            ]
+
+            st.dataframe(
+                schedule_preview,
+                use_container_width=True,
+                hide_index=True,
+            )
 
             st.caption(
-                f"Showing the first 10 of "
-                f"{len(schedule)} planned sessions."
+                f"{len(schedule)} sessions fit into the selected "
+                f"schedule and date range."
+            )
+
+            expected_sessions = int(
+                workload // hours_per_session
+                + (workload % hours_per_session > 0)
+            )
+
+            if len(schedule) < expected_sessions:
+                st.warning(
+                    "The schedule does not fit the entire working "
+                    "estimate before the deadline."
+                )
+
+        else:
+            st.info(
+                "No sessions fit the selected study days and dates."
             )
