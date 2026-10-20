@@ -1,6 +1,5 @@
 
 import os
-import re
 import json
 from pathlib import Path
 from datetime import date, timedelta
@@ -86,20 +85,15 @@ if "plan_inputs" not in st.session_state:
 
 
 # ============================================================
-# OFFICIAL WORKLOAD RESEARCH
+# WORKLOAD RESEARCH
 # ============================================================
 
-def research_workload(
-    language,
-    current_level,
-    target_level,
-):
+def research_workload(language, current_level, target_level):
     """
-    Researches workload evidence for the requested
-    language-level transition.
+    Find credible workload evidence for a language-level transition.
 
-    Cadence calculates the trajectory.
-    Groq researches and interprets external evidence.
+    Search and interpretation are handled by Tavily and Groq.
+    Cadence calculates the user's trajectory separately.
     """
 
     groq_api_key = os.getenv("GROQ_API_KEY")
@@ -117,122 +111,152 @@ def research_workload(
         except (KeyError, FileNotFoundError):
             pass
 
-    if not groq_api_key:
+    if not groq_api_key or not tavily_api_key:
         raise RuntimeError(
-            "GROQ_API_KEY was not found in the .env file."
-        )
-
-    if not tavily_api_key:
-        raise RuntimeError(
-            "TAVILY_API_KEY was not found in the .env file."
+            "A required API key is missing. Check your .env file "
+            "or your Streamlit Cloud secrets."
         )
 
     groq_client = Groq(api_key=groq_api_key)
     tavily_client = TavilyClient(api_key=tavily_api_key)
 
     language_config = LANGUAGE_CONFIG.get(language, {})
+    research_hint = language_config.get("research_hint", "")
 
-    research_hint = language_config.get(
-        "research_hint",
-        "Find an appropriate official language education source.",
-    )
+    queries = [
+        (
+            f"{language} CEFR {current_level} to {target_level} "
+            "learning hours university language school course duration"
+        ),
+        (
+            f"{language} CEFR levels cumulative study hours "
+            "official university language centre examination"
+        ),
+        (
+            f"{language} {target_level} CEFR course hours "
+            "language institute study workload"
+        ),
+    ]
 
-    query = f"""
-You are the research component of an application called Cadence.
+    search_results = []
+    seen_urls = set()
 
-Cadence helps a person understand whether their current
-learning pace is compatible with a deadline.
+    # Search separately so one failed query doesn't end the research.
+    for query in queries:
+        try:
+            response = tavily_client.search(
+                query=query,
+                search_depth="advanced",
+                max_results=5,
+                include_answer=False,
+            )
 
-The user wants to progress in:
+            for item in response.get("results", []):
+                url = str(item.get("url", "")).strip()
+
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    search_results.append(item)
+
+        except Exception:
+            continue
+
+    if not search_results:
+        raise RuntimeError(
+            "Web search returned no usable results. "
+            "Check Tavily and try again."
+        )
+
+    sources = []
+
+    for item in search_results:
+        sources.append({
+            "title": item.get("title", ""),
+            "url": item.get("url", ""),
+            "content": item.get("content", ""),
+        })
+
+    prompt = f"""
+Research workload evidence for this learning goal.
 
 Language: {language}
 Current level: {current_level}
 Target level: {target_level}
 
-Research guidance:
+Language-specific guidance:
 {research_hint}
 
-Your task is ONLY to find reliable workload evidence
-for progressing from the current level to the target level.
+Use only the supplied search results.
 
-IMPORTANT:
+Accept relevant evidence from:
+- Official language and examination organisations.
+- Government and educational institutions.
+- Universities and university language centres.
+- Established language schools and recognised course providers.
 
-1. Search the web for a REAL official or authoritative source.
-2. Prefer the official institution responsible for the language,
-   an official educational institution, government source,
-   or official examination organization.
-3. Do NOT invent workload figures.
-4. If the source gives cumulative hours for levels,
-   calculate the transition mathematically.
-5. If you calculate the transition yourself, use:
-   EVIDENCE_TYPE = DERIVED.
-6. If the source directly gives the workload for the transition,
-   use:
-   EVIDENCE_TYPE = DIRECT.
-7. If the source gives a range, preserve the range.
-8. If the source gives only one reliable figure,
-   use that figure for LOW_HOURS, HIGH_HOURS and ESTIMATE_HOURS.
-9. If the source uses 45-minute teaching units,
-   convert them using:
-   1 teaching unit = 0.75 hours.
-10. Do not present a calculated transition as if the
-    official organization published that exact number.
-11. Keep the explanation short.
-12. Return ONLY valid JSON.
+Possible evidence includes:
+1. Hours directly associated with the requested transition.
+2. Comparable cumulative hours for the current and target levels.
+3. Course workload and duration for the target level.
+4. Other credible educational guidance that contextualises workload.
 
-Return exactly this structure:
+Evidence rules:
+- Prefer evidence relevant to the requested transition.
+- If cumulative figures for both levels are comparable, subtract
+  the lower-level figure from the target-level figure.
+- Label calculated transitions DERIVED, not DIRECT.
+- Do not subtract figures from incompatible systems or sources.
+- Convert 45-minute teaching units to hours by multiplying by 0.75.
+- Do not treat a course's duration as a universal requirement for
+  attaining a CEFR level.
+- Never invent figures, citations, source names, or URLs.
+- A credible university or language-school source may be useful
+  even if it is not a government publication.
+- Preserve a source's workload range when available.
+- For one supported figure, use the same figure for low, high,
+  and estimated hours.
+- If no defensible numerical estimate can be established, return
+  INSUFFICIENT and set all hour fields to null.
+- Copy the citation URL exactly from the supplied results.
+
+Return only a valid JSON object with exactly these fields:
 
 {{
-    "evidence_type": "DIRECT" or "DERIVED",
-    "source": "official source name",
-    "source_url": "exact official source URL",
-    "low_hours": number,
-    "high_hours": number or null,
-    "estimate_hours": number,
-    "reason": "short explanation",
-    "evidence": "short statement of the evidence"
+  "evidence_type": "DIRECT, DERIVED, or INSUFFICIENT",
+  "source": "source name or empty string",
+  "source_url": "exact result URL or empty string",
+  "low_hours": number or null,
+  "high_hours": number or null,
+  "estimate_hours": number or null,
+  "reason": "brief explanation",
+  "evidence": "short summary of what the source actually says"
 }}
+
+For INSUFFICIENT, all three hour fields must be null.
+For a supported range, estimate_hours must be within the range.
+Do not claim that a source publishes a calculated figure.
 """
 
     try:
-        search_response = tavily_client.search(
-            query=query,
-            search_depth="advanced",
-            max_results=5,
-        )
-
-        search_results = search_response.get("results", [])
-
-        if not search_results:
-            raise RuntimeError(
-                "Tavily found no relevant web sources."
-            )
-
-        sources_text = json.dumps(
-            search_results,
-            ensure_ascii=False,
-            indent=2,
-        )
-
         groq_response = groq_client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "You are Cadence's research component. "
+                        "You are a careful research assistant. "
                         "Use only the supplied search results. "
-                        "Do not invent sources or workload figures. "
-                        "If the evidence is insufficient, say so. "
-                        "Return only valid JSON matching the requested schema."
+                        "Never invent citations or workload figures. "
+                        "Return valid JSON matching the requested schema. "
+                        "Use INSUFFICIENT when evidence is inadequate."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        query
-                        + "\n\nWeb search results:\n"
-                        + sources_text
+                        prompt
+                        + "\n\nSearch results:\n"
+                        + json.dumps(sources, ensure_ascii=False)
                     ),
                 },
             ],
@@ -242,148 +266,93 @@ Return exactly this structure:
 
     except Exception as error:
         raise RuntimeError(
-            "Groq and Tavily could not complete the workload research. "
+            "The research service could not complete the request. "
             f"{error}"
         )
 
     raw_text = groq_response.choices[0].message.content or ""
 
-    if not raw_text.strip():
-        raise RuntimeError(
-            "Groq returned an empty research result."
-        )
-
-    # --------------------------------------------------------
-    # PARSE JSON
-    # --------------------------------------------------------
-
-    text = raw_text.strip()
-
-    if text.startswith("```"):
-        text = re.sub(
-            r"^```(?:json)?\s*",
-            "",
-            text,
-            flags=re.IGNORECASE,
-        )
-
-        text = re.sub(
-            r"\s*```$",
-            "",
-            text,
-        )
-
     try:
-        research = json.loads(text)
-
-    except json.JSONDecodeError as error:
+        research = json.loads(raw_text)
+    except json.JSONDecodeError:
         raise RuntimeError(
-            "Groq returned invalid JSON.\n\n"
-            f"{raw_text}\n\n"
-            f"JSON error: {error}"
+            "The research service returned invalid JSON."
         )
-
-    # --------------------------------------------------------
-    # VALIDATE REQUIRED FIELDS
-    # --------------------------------------------------------
-
-    required_fields = [
-        "evidence_type",
-        "source",
-        "source_url",
-        "low_hours",
-        "high_hours",
-        "estimate_hours",
-        "reason",
-        "evidence",
-    ]
-
-    missing_fields = [
-        field
-        for field in required_fields
-        if field not in research
-    ]
-
-    if missing_fields:
-        raise RuntimeError(
-            "Groq research is missing required fields: "
-            + ", ".join(missing_fields)
-        )
-
-    # --------------------------------------------------------
-    # NORMALIZE VALUES
-    # --------------------------------------------------------
 
     evidence_type = str(
-        research["evidence_type"]
+        research.get("evidence_type", "")
     ).strip().upper()
 
-    if evidence_type not in {"DIRECT", "DERIVED"}:
+    if evidence_type not in {"DIRECT", "DERIVED", "INSUFFICIENT"}:
         raise RuntimeError(
-            "Groq returned an invalid evidence type."
+            "The research response contained an unsupported evidence type."
         )
 
-    source = str(research["source"]).strip()
-    source_url = str(research["source_url"]).strip()
-    reason = str(research["reason"]).strip()
-    evidence = str(research["evidence"]).strip()
+    # Insufficient evidence is a valid result, not a crash.
+    if evidence_type == "INSUFFICIENT":
+        return {
+            "evidence_type": "INSUFFICIENT",
+            "source": str(research.get("source") or "").strip(),
+            "source_url": "",
+            "low_hours": None,
+            "high_hours": None,
+            "estimate_hours": None,
+            "reason": str(
+                research.get("reason")
+                or "The available sources did not support a reliable estimate."
+            ).strip(),
+            "evidence": str(
+                research.get("evidence") or ""
+            ).strip(),
+            "sources_found": sources,
+            "raw_text": raw_text,
+        }
+
+    source = str(research.get("source") or "").strip()
+    source_url = str(research.get("source_url") or "").strip()
+    reason = str(research.get("reason") or "").strip()
+    evidence = str(research.get("evidence") or "").strip()
+
+    # Accept citations only when the URL was returned by Tavily.
+    valid_urls = {item["url"] for item in sources}
+
+    if source_url not in valid_urls:
+        raise RuntimeError(
+            "The selected citation was not among the retrieved results."
+        )
 
     try:
         low_hours = float(research["low_hours"])
         estimate_hours = float(research["estimate_hours"])
 
-    except (TypeError, ValueError):
-        raise RuntimeError(
-            "Groq returned invalid workload numbers."
+        high_value = research.get("high_hours")
+        high_hours = (
+            None if high_value is None else float(high_value)
         )
 
-    high_value = research["high_hours"]
-
-    if high_value is None:
-        high_hours = None
-    else:
-        try:
-            high_hours = float(high_value)
-
-        except (TypeError, ValueError):
-            raise RuntimeError(
-                "Groq returned an invalid HIGH_HOURS value."
-            )
-
-    # --------------------------------------------------------
-    # VALIDATE WORKLOAD
-    # --------------------------------------------------------
-
-    if low_hours < 0:
+    except (KeyError, TypeError, ValueError):
         raise RuntimeError(
-            "LOW_HOURS cannot be negative."
+            "The research response did not contain valid workload figures."
         )
 
-    if estimate_hours < 0:
-        raise RuntimeError(
-            "ESTIMATE_HOURS cannot be negative."
-        )
+    if low_hours < 0 or estimate_hours < 0:
+        raise RuntimeError("Workload hours cannot be negative.")
 
     if high_hours is not None:
         if high_hours < low_hours:
             raise RuntimeError(
-                "HIGH_HOURS cannot be below LOW_HOURS."
+                "The upper workload bound is below the lower bound."
             )
 
         if not low_hours <= estimate_hours <= high_hours:
             raise RuntimeError(
-                "ESTIMATE_HOURS must be within "
-                "the researched workload range."
+                "The estimate is outside the researched workload range."
             )
 
     elif estimate_hours < low_hours:
         raise RuntimeError(
-            "ESTIMATE_HOURS cannot be below LOW_HOURS."
+            "The estimate is below the reported lower workload bound."
         )
-
-    # --------------------------------------------------------
-    # RETURN CLEAN RESEARCH RESULT
-    # --------------------------------------------------------
 
     return {
         "evidence_type": evidence_type,
@@ -395,6 +364,7 @@ Return exactly this structure:
         "reason": reason,
         "evidence": evidence,
         "raw_text": raw_text,
+        "sources_found": sources,
     }
 
 
@@ -725,9 +695,7 @@ if ready_for_plan:
     weekly_hours = hours_number * sessions_number
 
     if start_date > deadline:
-        st.error(
-            "Your start date must be before your deadline."
-        )
+        st.error("Your start date must be before your deadline.")
         valid_schedule_inputs = False
 
     if sessions_number > 0:
@@ -748,36 +716,16 @@ if ready_for_plan and valid_schedule_inputs:
         unsafe_allow_html=True,
     )
 
-    st.write(
-        f"**{language}** · {current_level} → {target_level}"
-    )
-
-    st.write(
-        f"Start: **{start_date.strftime('%d %B %Y')}**"
-    )
-
-    st.write(
-        f"Deadline: **{deadline.strftime('%d %B %Y')}**"
-    )
-
-    st.write(
-        f"Session duration: **{hours_per_session}**"
-    )
-
-    st.write(
-        f"Sessions per week: **{sessions_per_week}**"
-    )
+    st.write(f"**{language}** · {current_level} → {target_level}")
+    st.write(f"Start: **{start_date.strftime('%d %B %Y')}**")
+    st.write(f"Deadline: **{deadline.strftime('%d %B %Y')}**")
+    st.write(f"Session duration: **{hours_per_session}**")
+    st.write(f"Sessions per week: **{sessions_per_week}**")
 
     if selected_days:
-        st.write(
-            "Study days: **"
-            + ", ".join(selected_days)
-            + "**"
-        )
+        st.write("Study days: **" + ", ".join(selected_days) + "**")
 
-    st.write(
-        f"Weekly capacity: **{weekly_hours:g} hours/week**"
-    )
+    st.write(f"Weekly capacity: **{weekly_hours:g} hours/week**")
 
     create_plan = st.button(
         "Create my plan",
@@ -787,9 +735,7 @@ if ready_for_plan and valid_schedule_inputs:
 
     if create_plan:
 
-        goal = (
-            f"{language} {current_level} → {target_level}"
-        )
+        goal = f"{language} {current_level} → {target_level}"
 
         st.session_state.plan_inputs = {
             "goal": goal,
@@ -808,9 +754,7 @@ if ready_for_plan and valid_schedule_inputs:
         st.session_state.plan_confirmed = False
         st.session_state.research = None
 
-        with st.spinner(
-            "Cadence is researching the official workload..."
-        ):
+        with st.spinner("Cadence is researching workload evidence..."):
             try:
                 research = research_workload(
                     language,
@@ -822,20 +766,15 @@ if ready_for_plan and valid_schedule_inputs:
                 st.session_state.plan_created = True
 
             except Exception as error:
-                st.error(
-                    "Cadence could not complete the live workload research."
-                )
-
+                st.error("Cadence couldn't complete the workload research.")
                 st.warning(
-                    "Live research is temporarily unavailable. "
-                    "Please try again later."
+                    "The research service failed. Please try again later."
                 )
-
                 st.caption(f"Technical detail: {error}")
 
 
 # ============================================================
-# COMPACT, VISUAL RESULTS
+# RESULTS
 # ============================================================
 
 if (
@@ -847,8 +786,37 @@ if (
     inputs = st.session_state.plan_inputs
     research = st.session_state.research
 
-    goal = inputs["goal"]
+    # Handle insufficient evidence before doing any workload maths.
+    if research["evidence_type"] == "INSUFFICIENT":
 
+        st.divider()
+        st.subheader("Evidence not sufficient yet")
+        st.write(research["reason"])
+
+        if research["evidence"]:
+            st.caption(research["evidence"])
+
+        st.info(
+            "Cadence couldn't verify a defensible workload estimate "
+            "from the sources found. It won't invent a number or "
+            "label your trajectory without one."
+        )
+
+        sources_found = research.get("sources_found", [])
+
+        if sources_found:
+            with st.expander("Sources found"):
+                for item in sources_found:
+                    st.markdown(f"**{item.get('title') or 'Source'}**")
+                    st.caption(item.get("content", ""))
+
+                    url = item.get("url", "")
+                    if url.startswith(("https://", "http://")):
+                        st.markdown(f"[Open source]({url})")
+
+        st.stop()
+
+    goal = inputs["goal"]
     language = inputs["language"]
     current_level = inputs["current_level"]
     target_level = inputs["target_level"]
@@ -861,73 +829,37 @@ if (
     weekly_hours = inputs["weekly_hours"]
     selected_days = inputs["selected_days"]
 
-    # --------------------------------------------------------
-    # RESEARCHED WORKLOAD
-    # --------------------------------------------------------
-
-    workload = max(
-        float(research["estimate_hours"]),
-        0.1,
-    )
-
-    low_workload = max(
-        float(research["low_hours"]),
-        0.0,
-    )
+    workload = max(float(research["estimate_hours"]), 0.1)
+    low_workload = max(float(research["low_hours"]), 0.0)
 
     high_value = research["high_hours"]
-
-    if high_value is None:
-        high_workload = None
-    else:
-        high_workload = max(
-            float(high_value),
-            low_workload,
-        )
+    high_workload = (
+        None
+        if high_value is None
+        else max(float(high_value), low_workload)
+    )
 
     # --------------------------------------------------------
     # TIME REMAINING AND REQUIRED PACE
     # --------------------------------------------------------
 
     today = date.today()
-
-    days_remaining = max(
-        (deadline - today).days,
-        0,
-    )
-
+    days_remaining = max((deadline - today).days, 0)
     weeks_remaining = days_remaining / 7
 
     if weeks_remaining > 0:
         low_required_pace = low_workload / weeks_remaining
         estimate_required_pace = workload / weeks_remaining
 
-        if high_workload is not None:
-            high_required_pace = high_workload / weeks_remaining
-        else:
-            high_required_pace = None
+        high_required_pace = (
+            None
+            if high_workload is None
+            else high_workload / weeks_remaining
+        )
     else:
         low_required_pace = float("inf")
         estimate_required_pace = float("inf")
         high_required_pace = None
-
-    estimate_gap = max(
-        estimate_required_pace - weekly_hours,
-        0,
-    )
-
-    low_gap = max(
-        low_required_pace - weekly_hours,
-        0,
-    )
-
-    if high_required_pace is not None:
-        high_gap = max(
-            high_required_pace - weekly_hours,
-            0,
-        )
-    else:
-        high_gap = None
 
     # --------------------------------------------------------
     # TRAJECTORY STATUS
@@ -948,10 +880,11 @@ if (
     # TIME AT CURRENT CAPACITY
     # --------------------------------------------------------
 
-    if weekly_hours > 0:
-        weeks_at_capacity = workload / weekly_hours
-    else:
-        weeks_at_capacity = float("inf")
+    weeks_at_capacity = (
+        workload / weekly_hours
+        if weekly_hours > 0
+        else float("inf")
+    )
 
     # --------------------------------------------------------
     # ACTUAL SESSION SCHEDULE
@@ -984,23 +917,16 @@ if (
 
         current_date = start_date
 
-        full_sessions = int(
-            workload // hours_per_session
-        )
-
+        full_sessions = int(workload // hours_per_session)
         remaining_session_hours = (
             workload - full_sessions * hours_per_session
         )
 
         total_sessions = full_sessions
-
         if remaining_session_hours > 0:
             total_sessions += 1
 
-        while (
-            len(schedule) < total_sessions
-            and current_date <= deadline
-        ):
+        while len(schedule) < total_sessions and current_date <= deadline:
 
             if current_date.weekday() in selected_weekdays:
 
@@ -1014,13 +940,11 @@ if (
                 else:
                     duration = hours_per_session
 
-                schedule.append(
-                    {
-                        "session": session_number,
-                        "date": current_date,
-                        "duration": duration,
-                    }
-                )
+                schedule.append({
+                    "session": session_number,
+                    "date": current_date,
+                    "duration": duration,
+                })
 
             current_date += timedelta(days=1)
 
@@ -1041,22 +965,16 @@ if (
         status_title = "Behind schedule"
         status_icon = "!"
 
-    if weeks_remaining > 0:
-        required_hours_per_week = workload / weeks_remaining
-    else:
-        required_hours_per_week = float("inf")
+    required_hours_per_week = (
+        workload / weeks_remaining
+        if weeks_remaining > 0
+        else float("inf")
+    )
 
     st.divider()
-
-    st.caption(
-        f"{language.upper()} · {current_level} → {target_level}"
-    )
-
+    st.caption(f"{language.upper()} · {current_level} → {target_level}")
     st.subheader(f"{status_icon} {status_title}")
-
-    st.caption(
-        f"Deadline: {deadline.strftime('%d %B %Y')}"
-    )
+    st.caption(f"Deadline: {deadline.strftime('%d %B %Y')}")
 
     # --------------------------------------------------------
     # KEY NUMBERS
@@ -1065,22 +983,13 @@ if (
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.metric(
-            "Your pace",
-            f"{weekly_hours:g} h/wk",
-        )
+        st.metric("Your pace", f"{weekly_hours:g} h/wk")
 
     with col2:
-        st.metric(
-            "Time available",
-            f"{weeks_remaining:.1f} weeks",
-        )
+        st.metric("Time available", f"{weeks_remaining:.1f} weeks")
 
     with col3:
-        st.metric(
-            "Workload estimate",
-            f"{workload:g} hours",
-        )
+        st.metric("Workload estimate", f"{workload:g} hours")
 
     # --------------------------------------------------------
     # VISUAL TIME COMPARISON
@@ -1089,27 +998,18 @@ if (
     st.markdown("**Estimated time needed**")
 
     if weekly_hours > 0:
-        st.write(
-            f"{weeks_at_capacity:.1f} weeks at your current pace"
-        )
+        st.write(f"{weeks_at_capacity:.1f} weeks at your current pace")
     else:
-        st.write(
-            "Your current pace cannot complete the workload."
-        )
+        st.write("Your current pace cannot complete the workload.")
 
     if weeks_at_capacity > 0 and weeks_remaining > 0:
 
-        time_coverage = min(
-            weeks_remaining / weeks_at_capacity,
-            1.0,
-        )
-
+        time_coverage = min(weeks_remaining / weeks_at_capacity, 1.0)
         st.progress(time_coverage)
 
         if weeks_at_capacity > weeks_remaining:
             st.caption(
-                "Your available time is shorter than the "
-                "estimated time needed."
+                "Your available time is shorter than the estimated time needed."
             )
         else:
             st.caption(
@@ -1117,48 +1017,39 @@ if (
             )
 
     elif trajectory == "COMPLETE":
-        st.caption(
-            "The researched workload is marked complete."
-        )
+        st.caption("The researched workload is marked complete.")
     else:
-        st.caption(
-            "There is no time remaining before the deadline."
-        )
+        st.caption("There is no time remaining before the deadline.")
 
     # --------------------------------------------------------
-    # ONE ACTIONABLE RECOMMENDATION
+    # NEXT MOVE
     # --------------------------------------------------------
 
     st.markdown("### Your next move")
 
     if trajectory == "COMPLETE":
-
         st.write(
             "Review your progress and confirm whether you have "
             "reached your target level."
         )
 
     elif weeks_remaining <= 0:
-
         st.write(
             "Your deadline has arrived. Set a new deadline "
             "to calculate a new trajectory."
         )
 
     elif weekly_hours >= required_hours_per_week:
-
         st.write(
             "Keep your current study pace and review your "
             "progress regularly."
         )
 
     else:
-
         st.write(
             f"To meet the {workload:g}-hour working estimate, "
             f"aim for about {required_hours_per_week:.1f} "
-            f"study hours per week, instead of "
-            f"{weekly_hours:g}."
+            f"study hours per week, instead of {weekly_hours:g}."
         )
 
     st.caption(
@@ -1167,7 +1058,7 @@ if (
     )
 
     # --------------------------------------------------------
-    # OPTIONAL RESEARCH DETAILS
+    # RESEARCH DETAILS
     # --------------------------------------------------------
 
     with st.expander("Research evidence and source"):
@@ -1182,10 +1073,7 @@ if (
         st.write("**Source:**", research["source"])
 
         if research["source_url"].startswith(("https://", "http://")):
-            st.link_button(
-                "View source",
-                research["source_url"],
-            )
+            st.link_button("View source", research["source_url"])
 
         if high_workload is not None:
             st.caption(
@@ -1198,7 +1086,7 @@ if (
             )
 
     # --------------------------------------------------------
-    # OPTIONAL STUDY SCHEDULE
+    # STUDY SCHEDULE
     # --------------------------------------------------------
 
     with st.expander("View study schedule"):
@@ -1222,7 +1110,7 @@ if (
 
             st.caption(
                 f"{len(schedule)} sessions fit into the selected "
-                f"schedule and date range."
+                "schedule and date range."
             )
 
             expected_sessions = int(
