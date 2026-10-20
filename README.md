@@ -43,3 +43,11 @@ Never commit your `.env` file or share your API keys publicly.
 ## Project status
 
 Cadence is an early-stage prototype. Future development will focus on improving workload evidence, trajectory assessments, and support for additional goal types.
+
+## Author and contributions
+
+**Nawel Cheurfaoui — Solo developer**
+
+Responsible for the project concept, product design, Python implementation, Streamlit interface, integration of Groq and Tavily, testing, and deployment.
+
+AI tools were used to assist with development and debugging.
