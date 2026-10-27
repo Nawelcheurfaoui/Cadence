@@ -1,4 +1,3 @@
-
 import json
 import sys
 from datetime import date, datetime, timedelta
@@ -42,7 +41,7 @@ apply_design()
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = BASE_DIR.parent if BASE_DIR.name == "pages" else BASE_DIR
+PROJECT_DIR = BASE_DIR
 
 PLAN_FILE = PROJECT_DIR / "confirmed_plan.json"
 SESSION_FILE = PROJECT_DIR / "session_history.json"
