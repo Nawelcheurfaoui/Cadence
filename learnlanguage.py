@@ -1,8 +1,8 @@
-
 import os
 import json
 from pathlib import Path
 from datetime import date, timedelta
+from uuid import uuid4
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -39,6 +39,14 @@ st.set_page_config(
     page_icon="◌",
     layout="centered",
 )
+pg = st.navigation([
+    st.Page("learnlanguage.py", title="Cadence", default=True),
+    st.Page(
+        "pages/learning_tracker.py",
+        title="Learning Tracker",
+        icon="📘",
+    ),
+])
 
 apply_design()
 
@@ -1128,3 +1136,64 @@ if (
             st.info(
                 "No sessions fit the selected study days and dates."
             )
+
+      # --------------------------------------------------------
+    # CONFIRM PLAN + OPEN TRACKER
+    # --------------------------------------------------------
+
+    st.divider()
+    st.markdown("### Keep this plan in Cadence")
+    st.caption(
+        "Confirming saves this researched plan for the Learning Tracker. "
+        "Your session history will be tied to this specific plan."
+    )
+
+    if st.session_state.plan_confirmed:
+        st.success("Plan confirmed and saved.")
+
+        st.button(
+    "Open Learning Tracker",
+    icon="📘",
+    use_container_width=True,
+    on_click=lambda: st.switch_page("pages/learning_tracker.py"),
+)
+
+    elif st.button(
+        "Confirm plan and save",
+        type="primary",
+        use_container_width=True,
+    ):
+        plan_to_save = {
+            "plan_id": str(uuid4()),
+            "goal": goal,
+            "language": language,
+            "current_level": current_level,
+            "target_level": target_level,
+            "start_date": start_date.isoformat(),
+            "deadline": deadline.isoformat(),
+            "hours_per_session": hours_per_session,
+            "sessions_per_week": sessions_per_week,
+            "weekly_hours": weekly_hours,
+            "workload_hours": workload,
+            "low_workload_hours": low_workload,
+            "high_workload_hours": high_workload,
+            "required_pace": (
+                workload / weeks_remaining if weeks_remaining > 0 else 0.0
+            ),
+            "selected_days": selected_days,
+            "research_source": research.get("source", "Research"),
+            "research_source_url": research.get("source_url", ""),
+            "research_reason": research.get("reason", ""),
+            "research_evidence": research.get("evidence", ""),
+            "evidence_type": research.get("evidence_type", ""),
+            "confirmed_at": date.today().isoformat(),
+        }
+
+        try:
+            save_confirmed_plan(plan_to_save)
+            st.session_state.plan_confirmed = True
+            st.rerun()
+
+        except OSError as error:
+            st.error("Cadence couldn't save this plan.")
+            st.caption(f"Technical detail: {error}")
