@@ -1,6 +1,4 @@
-
 import streamlit as st
-
 
 def apply_design():
     st.markdown(
