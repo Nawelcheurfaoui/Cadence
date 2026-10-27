@@ -1,5 +1,4 @@
 import json
-import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -7,25 +6,10 @@ import streamlit as st
 
 from design import apply_design
 
+
 # ============================================================
 # SETUP
 # ============================================================
-
-
-BASE_DIR = Path(__file__).resolve().parent
-PLAN_FILE = BASE_DIR / "confirmed_plan.json"
-
-
-def save_confirmed_plan(plan):
-    with open(PLAN_FILE, "w", encoding="utf-8") as file:
-        json.dump(
-            plan,
-            file,
-            indent=2,
-            ensure_ascii=False,
-            default=str,
-        )
-
 
 st.set_page_config(
     page_title="Cadence",
@@ -45,7 +29,6 @@ PROJECT_DIR = BASE_DIR
 
 PLAN_FILE = PROJECT_DIR / "confirmed_plan.json"
 SESSION_FILE = PROJECT_DIR / "session_history.json"
-
 
 # ============================================================
 # HELPERS
@@ -502,24 +485,144 @@ with col3:
     )
 
 
+
 # ============================================================
-# PROGRESS BAR
+# VISUAL PROGRESS DASHBOARD
 # ============================================================
 
 if total_sessions > 0:
+    progress = min(completed_sessions / total_sessions, 1.0)
+    progress_pct = progress * 100
 
-    progress = min(
-        completed_sessions / total_sessions,
-        1.0,
+    ring_col, stats_col = st.columns(
+        [1, 1.7],
+        vertical_alignment="center",
     )
 
-    st.progress(
-        progress
-    )
+    with ring_col:
+        st.markdown(
+            f"""
+            <div style="
+                display:flex;
+                justify-content:center;
+                align-items:center;
+                padding:16px 0 24px;
+            ">
+                <div style="
+                    width:190px;
+                    height:190px;
+                    border-radius:50%;
+                    background:conic-gradient(
+                        #788b70 {progress_pct:.4f}%,
+                        #e4ddd3 {progress_pct:.4f}% 100%
+                    );
+                    display:flex;
+                    justify-content:center;
+                    align-items:center;
+                    box-shadow:0 8px 24px rgba(63,48,40,0.08);
+                ">
+                    <div style="
+                        width:158px;
+                        height:158px;
+                        border-radius:50%;
+                        background:#f7f3ed;
+                        display:flex;
+                        flex-direction:column;
+                        justify-content:center;
+                        align-items:center;
+                        text-align:center;
+                    ">
+                        <div style="
+                            font-size:36px;
+                            font-weight:750;
+                            letter-spacing:-1.5px;
+                            color:#3f3028;
+                            line-height:1.2;
+                        ">{progress_pct:.1f}%</div>
+                        <div style="
+                            font-size:12px;
+                            color:#806e62;
+                            margin-top:5px;
+                        ">COMPLETE</div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    st.caption(
-        f"{completed_sessions} of "
-        f"{total_sessions} sessions completed"
+    with stats_col:
+        st.markdown(
+            f"""
+            <div style="
+                color:#806e62;
+                font-size:12px;
+                font-weight:700;
+                letter-spacing:2px;
+                margin-bottom:8px;
+            ">YOUR JOURNEY</div>
+
+            <div style="
+                font-size:27px;
+                font-weight:750;
+                color:#3f3028;
+                line-height:1.25;
+            ">{completed_sessions} of {total_sessions}</div>
+
+            <div style="
+                color:#806e62;
+                font-size:14px;
+                margin-bottom:20px;
+            ">planned sessions completed</div>
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                gap:12px;
+                padding:12px 0;
+                border-top:1px solid #ded4c8;
+                color:#3f3028;
+                font-size:14px;
+            ">
+                <span>Sessions remaining</span>
+                <strong>{remaining_sessions}</strong>
+            </div>
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                gap:12px;
+                padding:12px 0;
+                border-top:1px solid #ded4c8;
+                color:#3f3028;
+                font-size:14px;
+            ">
+                <span>Sessions missed</span>
+                <strong>{missed_sessions}</strong>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        completed_hours = min(
+            completed_sessions * hours_per_session,
+            workload_hours,
+        )
+
+        st.caption(
+            f"{completed_hours:g} of {workload_hours:g} "
+            "planned hours completed"
+        )
+
+    st.markdown(
+        """
+        <div style="
+            height:1px;
+            background:#ded4c8;
+            margin:4px 0 18px;
+        "></div>
+        """,
+        unsafe_allow_html=True,
     )
 
 
@@ -543,24 +646,32 @@ else:
     days_remaining = 0
     weeks_remaining = 0
 
-completed_hours = min(completed_sessions * hours_per_session, workload_hours)
-remaining_workload_hours = max(workload_hours - completed_hours, 0.0)
+completed_hours = min(
+    completed_sessions * hours_per_session,
+    workload_hours,
+)
+remaining_workload_hours = max(
+    workload_hours - completed_hours,
+    0.0,
+)
 elapsed_days = max((today - start_date).days, 0)
 elapsed_weeks = elapsed_days / 7
 
-# On day one, use the intended schedule as the initial pace. Afterwards,
-# judge trajectory using completed study time rather than planned capacity alone.
+# On day one, use the intended schedule as the initial pace.
+# Afterwards, use completed study time.
 actual_pace = (
     completed_hours / elapsed_weeks
     if elapsed_weeks > 0
     else weekly_hours
 )
+
 required_pace = (
     remaining_workload_hours / weeks_remaining
     if weeks_remaining > 0
     else 0.0
 )
 
+# Determine trajectory
 if remaining_workload_hours <= 0.001 or remaining_sessions == 0:
     trajectory = "COMPLETE"
 elif weeks_remaining <= 0:
@@ -570,42 +681,54 @@ elif actual_pace >= required_pace:
 else:
     trajectory = "BELOW REQUIRED PACE"
 
-
+# Status message
 if trajectory == "COMPLETE":
-
-    st.success(
-        "COMPLETE"
-    )
-
+    st.success("COMPLETE")
 elif trajectory == "ON TRACK":
-
-    st.success(
-        "ON TRACK"
-    )
-
+    st.success("ON TRACK")
 elif trajectory == "BELOW REQUIRED PACE":
-
-    st.warning(
-        "BELOW REQUIRED PACE"
-    )
-
+    st.warning("BELOW REQUIRED PACE")
 else:
+    st.warning("DEADLINE REACHED")
 
-    st.warning(
-        "DEADLINE REACHED"
-    )
 
+# ============================================================
+# VISUAL PACE COMPARISON
+# ============================================================
 
 if weeks_remaining > 0:
-
     st.write(
-        f"You have {remaining_sessions} sessions remaining "
-        f"over approximately {weeks_remaining:.1f} weeks."
+        f"You have **{remaining_sessions} sessions remaining** "
+        f"over approximately **{weeks_remaining:.1f} weeks**."
     )
 
-    st.caption(f"Recent measured pace: approximately {actual_pace:.1f} hours/week")
-    st.caption(f"Required pace from now: approximately {required_pace:.1f} hours/week")
+    st.caption(
+        f"Measured pace: {actual_pace:.1f} hours/week"
+    )
+    st.caption(
+        f"Required pace from now: {required_pace:.1f} hours/week"
+    )
 
+    # Use a shared scale so the two bars are directly comparable.
+    pace_scale = max(actual_pace, required_pace, 0.1)
+
+    actual_width = min(actual_pace / pace_scale * 100, 100)
+    required_width = min(required_pace / pace_scale * 100, 100)
+
+    pace_difference = actual_pace - required_pace
+
+    if pace_difference >= 0:
+        pace_message = (
+            f"Your measured pace is {pace_difference:.1f} hours/week "
+            "above the required pace."
+        )
+        pace_color = "#657c5b"
+    else:
+        pace_message = (
+            f"Your measured pace is {abs(pace_difference):.1f} "
+            "hours/week below the required pace."
+        )
+        pace_color = "#a66a4c"
 
 # ============================================================
 # SESSIONS DUE
@@ -643,7 +766,6 @@ weekday_numbers = {
     "Sunday": 6,
 }
 
-
 selected_weekdays = sorted(
     weekday_numbers[day]
     for day in selected_days
@@ -652,14 +774,12 @@ selected_weekdays = sorted(
 
 
 def generate_sessions():
-
     sessions = []
 
     if not selected_weekdays:
         return sessions
 
     current_date = start_date
-
     session_number = 0
 
     while (
@@ -670,9 +790,7 @@ def generate_sessions():
         )
         and session_number < total_sessions
     ):
-
         if current_date.weekday() in selected_weekdays:
-
             session_number += 1
 
             sessions.append(
@@ -700,23 +818,15 @@ unconfirmed_sessions = [
     if get_session_status(item["date"]) is None
 ]
 
-
 if not unconfirmed_sessions:
-
     st.info(
         "There are no unconfirmed sessions right now."
     )
-
 else:
-
     for item in unconfirmed_sessions:
-
         session_date = item["date"]
 
-        with st.container(
-            border=True
-        ):
-
+        with st.container(border=True):
             st.subheader(
                 f"Session {item['number']} · "
                 f"{session_date.strftime('%A, %d %b')}"
@@ -729,33 +839,27 @@ else:
             col1, col2 = st.columns(2)
 
             with col1:
-
                 if st.button(
                     "✓ Complete",
                     key=f"complete_{session_date}",
                     use_container_width=True,
                 ):
-
                     record_session(
                         session_date,
                         "completed",
                     )
-
                     st.rerun()
 
             with col2:
-
                 if st.button(
                     "× Miss",
                     key=f"miss_{session_date}",
                     use_container_width=True,
                 ):
-
                     record_session(
                         session_date,
                         "missed",
                     )
-
                     st.rerun()
 
 
@@ -766,7 +870,6 @@ else:
 future_sessions = []
 
 if selected_weekdays:
-
     current_date = max(
         today + timedelta(days=1),
         start_date,
@@ -782,9 +885,7 @@ if selected_weekdays:
             or current_date <= deadline
         )
     ):
-
         if current_date.weekday() in selected_weekdays:
-
             session_number += 1
 
             future_sessions.append(
@@ -798,16 +899,12 @@ if selected_weekdays:
 
 
 if future_sessions:
-
     st.markdown(
-        '<div class="small-muted">'
-        "Upcoming sessions"
-        "</div>",
+        '<div class="small-muted">Upcoming sessions</div>',
         unsafe_allow_html=True,
     )
 
     for item in future_sessions[:3]:
-
         st.caption(
             f"Session {item['number']} · "
             f"{item['date'].strftime('%A, %d %b')}"
@@ -821,7 +918,6 @@ if future_sessions:
 real_activity = get_real_activity()
 
 if real_activity:
-
     st.divider()
 
     st.markdown(
@@ -836,23 +932,17 @@ if real_activity:
     )
 
     for item in sorted_activity[:7]:
-
-        activity_date = parse_date(
-            item["date"]
-        )
+        activity_date = parse_date(item["date"])
 
         if activity_date is None:
             continue
 
         if item.get("status") == "completed":
-
             st.success(
                 f"{activity_date.strftime('%d %b %Y')} "
                 "· ✓ Session completed"
             )
-
         elif item.get("status") == "missed":
-
             st.warning(
                 f"{activity_date.strftime('%d %b %Y')} "
                 "· × Session missed"
