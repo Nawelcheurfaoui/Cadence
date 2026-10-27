@@ -42,7 +42,7 @@ st.set_page_config(
 pg = st.navigation([
     st.Page("learnlanguage.py", title="Cadence", default=True),
     st.Page(
-        "pages/learning_tracker.py",
+        "learning_tracker.py",
         title="Learning Tracker",
         icon="📘",
     ),
@@ -1155,7 +1155,7 @@ if (
     "Open Learning Tracker",
     icon="📘",
     use_container_width=True,
-    on_click=lambda: st.switch_page("pages/learning_tracker.py"),
+    on_click=lambda: st.switch_page("learning_tracker.py"),
 )
 
     elif st.button(
