@@ -141,15 +141,46 @@ def german_workload_from_shared_benchmarks(current_level, target_level):
             }],
         }
 
-    # Conservative interval subtraction: the smallest plausible difference
-    # subtracts the current level's upper bound; the largest subtracts its
-    # lower bound. The working estimate is the difference between midpoints.
-    low_hours = max(0.0, target_low - current_high)
-    high_hours = max(low_hours, target_high - current_low)
+    # The working estimate is the difference between cumulative midpoints.
+    # But interval subtraction is only informative when the ranges support a
+    # meaningful positive lower bound. Adjacent Goethe ranges can overlap
+    # (for example B1 260–490 and B2 450–600), so their subtraction can yield
+    # a negative lower bound. Do not turn that into a fake precise range.
     current_midpoint = (current_low + current_high) / 2
     target_midpoint = (target_low + target_high) / 2
-    estimate_hours = max(0.0, target_midpoint - current_midpoint)
-    estimate_hours = min(max(estimate_hours, low_hours), high_hours)
+    estimate_hours = target_midpoint - current_midpoint
+    raw_low = target_low - current_high
+    raw_high = target_high - current_low
+    range_reliable = raw_low >= 0
+
+    if range_reliable:
+        low_hours = raw_low
+        high_hours = max(raw_low, raw_high)
+        estimate_hours = min(max(estimate_hours, low_hours), high_hours)
+        range_note = (
+            f"Derived transition range: {low_hours:g}–{high_hours:g} hours, "
+            "calculated by subtracting the cumulative bounds."
+        )
+        reason = (
+            f"Cadence derives {current_level}→{target_level} from the "
+            "Goethe-Institut's cumulative-from-zero ranges for both levels. "
+            "The working estimate is the difference between their midpoints. "
+            "The ranges support a non-negative interval subtraction."
+        )
+    else:
+        low_hours = None
+        high_hours = None
+        range_note = (
+            "The cumulative ranges overlap, so they do not establish a reliable "
+            "transition-hour range. Cadence shows the midpoint difference only "
+            "as a planning estimate, not as a directly verified requirement."
+        )
+        reason = (
+            f"Cadence derives a {current_level}→{target_level} working estimate "
+            "from the difference between the Goethe-Institut cumulative midpoints. "
+            "Because the cumulative ranges overlap, a reliable transition range "
+            "cannot be inferred from their bounds."
+        )
 
     return {
         "evidence_type": "DERIVED",
@@ -158,16 +189,13 @@ def german_workload_from_shared_benchmarks(current_level, target_level):
         "low_hours": low_hours,
         "high_hours": high_hours,
         "estimate_hours": estimate_hours,
-        "reason": (
-            f"Cadence calculates {current_level}→{target_level} from the "
-            "Goethe-Institut's cumulative-from-zero ranges for both levels. "
-            "The working estimate is the difference between their midpoints; "
-            "the displayed range is a conservative subtraction of the bounds."
-        ),
+        "range_reliable": range_reliable,
+        "reason": reason,
         "evidence": (
             f"Cumulative from zero: {current_level} = {current_low:g}–{current_high:g} hours; "
             f"{target_level} = {target_low:g}–{target_high:g} hours. "
-            "These are approximate instruction hours and vary by learner and course."
+            "These are approximate instruction hours and vary by learner and course. "
+            f"{range_note}"
         ),
         "raw_text": "",
         "sources_found": [{
@@ -947,13 +975,22 @@ if (
     selected_days = inputs["selected_days"]
 
     workload = max(float(research["estimate_hours"]), 0.1)
-    low_workload = max(float(research["low_hours"]), 0.0)
+    range_reliable = research.get("range_reliable", True)
+    low_value = research.get("low_hours")
+    high_value = research.get("high_hours")
 
-    high_value = research["high_hours"]
+    # When cumulative bounds overlap, there is no defensible transition range.
+    # Use the working estimate as the feasibility threshold, and do not show
+    # a fabricated lower/upper range or imply that the range is verified.
+    low_workload = (
+        max(float(low_value), 0.0)
+        if range_reliable and low_value is not None
+        else workload
+    )
     high_workload = (
-        None
-        if high_value is None
-        else max(float(high_value), low_workload)
+        max(float(high_value), low_workload)
+        if range_reliable and high_value is not None
+        else None
     )
 
     # --------------------------------------------------------
@@ -1250,14 +1287,18 @@ if (
         if research["source_url"].startswith(("https://", "http://")):
             st.link_button("View source", research["source_url"])
 
-        if high_workload is not None:
+        if range_reliable and high_workload is not None:
             st.caption(
-                f"Researched range: {low_workload:g}–"
-                f"{high_workload:g} hours."
+                f"Derived transition range: {low_workload:g}–"
+                f"{high_workload:g} hours; working estimate: {workload:g} hours."
             )
+        elif research["evidence_type"] == "INSUFFICIENT":
+            st.caption("No defensible workload estimate is available for this transition.")
         else:
             st.caption(
-                f"Available workload figure: {low_workload:g} hours."
+                f"Derived working estimate: {workload:g} hours. "
+                "No reliable transition range can be inferred from the overlapping "
+                "cumulative ranges."
             )
 
     # --------------------------------------------------------
@@ -1347,6 +1388,7 @@ if (
             "workload_hours": workload,
             "low_workload_hours": low_workload,
             "high_workload_hours": high_workload,
+            "workload_range_reliable": range_reliable,
             "required_pace": (
                 required_hours_per_week if required_hours_per_week != float("inf") else 0.0
             ),
