@@ -81,6 +81,103 @@ if "plan_inputs" not in st.session_state:
 # WORKLOAD RESEARCH
 # ============================================================
 
+# Shared cumulative benchmark for German. These are the Goethe-Institut's
+# published approximate instruction-hour ranges from zero, not hours for
+# each individual level. Using one shared table prevents independently
+# researched goals from contradicting one another (for example, A0→A2
+# being estimated as more work than A0→B1).
+GERMAN_CUMULATIVE_HOURS = {
+    "A0": (0.0, 0.0),
+    "A1": (60.0, 150.0),
+    "A2": (150.0, 260.0),
+    "B1": (260.0, 490.0),
+    "B2": (450.0, 600.0),
+    "C1": (600.0, 750.0),
+    # Goethe publishes C2 as "750+"; without an upper bound, Cadence
+    # cannot honestly calculate a midpoint estimate for this target.
+    "C2": (750.0, None),
+}
+GERMAN_GOETHE_SOURCE = "Goethe-Institut Brussels — How long does it take to learn German?"
+GERMAN_GOETHE_URL = "https://www.goethe.de/ins/be/en/spr/kur/ogf.html"
+
+
+def german_workload_from_shared_benchmarks(current_level, target_level):
+    """Calculate a German transition from one consistent cumulative source."""
+    levels = list(GERMAN_CUMULATIVE_HOURS)
+    if current_level not in levels or target_level not in levels:
+        return None
+
+    current_index = levels.index(current_level)
+    target_index = levels.index(target_level)
+    if target_index <= current_index:
+        return None
+
+    current_low, current_high = GERMAN_CUMULATIVE_HOURS[current_level]
+    target_low, target_high = GERMAN_CUMULATIVE_HOURS[target_level]
+
+    # The C2 benchmark is open-ended, so don't invent an upper bound or
+    # midpoint. Report insufficient evidence for a single working estimate.
+    if target_high is None or current_high is None:
+        return {
+            "evidence_type": "INSUFFICIENT",
+            "source": GERMAN_GOETHE_SOURCE,
+            "source_url": GERMAN_GOETHE_URL,
+            "low_hours": None,
+            "high_hours": None,
+            "estimate_hours": None,
+            "reason": (
+                "The Goethe-Institut reports C2 as 750+ cumulative hours, "
+                "without an upper bound. Cadence cannot calculate a defensible "
+                "working estimate for this transition from that open-ended range."
+            ),
+            "evidence": (
+                "The Goethe-Institut publishes cumulative German instruction-hour "
+                "ranges for A1–C1 and an open-ended 750+ figure for C2."
+            ),
+            "sources_found": [{
+                "title": GERMAN_GOETHE_SOURCE,
+                "url": GERMAN_GOETHE_URL,
+                "content": "Published cumulative German instruction-hour ranges by CEFR level.",
+            }],
+        }
+
+    # Conservative interval subtraction: the smallest plausible difference
+    # subtracts the current level's upper bound; the largest subtracts its
+    # lower bound. The working estimate is the difference between midpoints.
+    low_hours = max(0.0, target_low - current_high)
+    high_hours = max(low_hours, target_high - current_low)
+    current_midpoint = (current_low + current_high) / 2
+    target_midpoint = (target_low + target_high) / 2
+    estimate_hours = max(0.0, target_midpoint - current_midpoint)
+    estimate_hours = min(max(estimate_hours, low_hours), high_hours)
+
+    return {
+        "evidence_type": "DERIVED",
+        "source": GERMAN_GOETHE_SOURCE,
+        "source_url": GERMAN_GOETHE_URL,
+        "low_hours": low_hours,
+        "high_hours": high_hours,
+        "estimate_hours": estimate_hours,
+        "reason": (
+            f"Cadence calculates {current_level}→{target_level} from the "
+            "Goethe-Institut's cumulative-from-zero ranges for both levels. "
+            "The working estimate is the difference between their midpoints; "
+            "the displayed range is a conservative subtraction of the bounds."
+        ),
+        "evidence": (
+            f"Cumulative from zero: {current_level} = {current_low:g}–{current_high:g} hours; "
+            f"{target_level} = {target_low:g}–{target_high:g} hours. "
+            "These are approximate instruction hours and vary by learner and course."
+        ),
+        "raw_text": "",
+        "sources_found": [{
+            "title": GERMAN_GOETHE_SOURCE,
+            "url": GERMAN_GOETHE_URL,
+            "content": "Published cumulative German instruction-hour ranges by CEFR level.",
+        }],
+    }
+
+
 def research_workload(language, current_level, target_level):
     """
     Find credible workload evidence for a language-level transition.
@@ -88,6 +185,16 @@ def research_workload(language, current_level, target_level):
     Search and interpretation are handled by Tavily and Groq.
     Cadence calculates the user's trajectory separately.
     """
+
+    # German uses one shared cumulative benchmark set from the Goethe-Institut.
+    # Do not let a separate model/search call produce incompatible estimates
+    # for A0→A2 and A0→B1. Other languages continue through web research below.
+    if language.strip().lower() == "german":
+        benchmark_result = german_workload_from_shared_benchmarks(
+            current_level, target_level
+        )
+        if benchmark_result is not None:
+            return benchmark_result
 
     groq_api_key = os.getenv("GROQ_API_KEY")
     tavily_api_key = os.getenv("TAVILY_API_KEY")
@@ -126,8 +233,8 @@ def research_workload(language, current_level, target_level):
             "official university language centre examination"
         ),
         (
-            f"{language} {target_level} CEFR course hours "
-            "language institute study workload"
+            f"{language} study hours from {current_level} to {target_level} "
+            "CEFR transition workload language school university"
         ),
     ]
 
@@ -190,14 +297,27 @@ Accept relevant evidence from:
 Possible evidence includes:
 1. Hours directly associated with the requested transition.
 2. Comparable cumulative hours for the current and target levels.
-3. Course workload and duration for the target level.
+3. Course workload only when the course's entry and exit levels match
+   the requested transition.
 4. Other credible educational guidance that contextualises workload.
 
-Evidence rules:
-- Prefer evidence relevant to the requested transition.
-- If cumulative figures for both levels are comparable, subtract
-  the lower-level figure from the target-level figure.
-- Label calculated transitions DERIVED, not DIRECT.
+Evidence rules (strict):
+- The requested workload is the effort needed to move specifically
+  from {current_level} to {target_level}, not merely the duration of
+  a course labelled {target_level}.
+- DIRECT is allowed only when a supplied source explicitly gives
+  workload for this exact transition, or clearly describes a course
+  designed for learners entering at {current_level} and finishing at
+  {target_level}.
+- If a source gives cumulative hours from absolute beginner for both
+  levels, and the figures use the same system, subtract the current
+  level's cumulative hours from the target level's cumulative hours.
+  Label that result DERIVED.
+- If {current_level} is absolute beginner (A0/beginner/no prior
+  knowledge), a credible cumulative-from-zero figure for {target_level}
+  may be used as a DERIVED transition estimate from zero.
+- A target-level course duration by itself is NOT proof of total hours
+  needed from the user's current level. Do not silently treat it as such.
 - Do not subtract figures from incompatible systems or sources.
 - Convert 45-minute teaching units to hours by multiplying by 0.75.
 - Do not treat a course's duration as a universal requirement for
@@ -205,11 +325,15 @@ Evidence rules:
 - Never invent figures, citations, source names, or URLs.
 - A credible university or language-school source may be useful
   even if it is not a government publication.
-- Preserve a source's workload range when available.
+- Preserve a source's workload range when available. If cumulative
+  ranges are subtracted, calculate a conservative transition range:
+  low = max(0, target low - current high), high = target high - current low.
+  Only do this when both ranges are comparable and high is not below low.
 - For one supported figure, use the same figure for low, high,
   and estimated hours.
-- If no defensible numerical estimate can be established, return
-  INSUFFICIENT and set all hour fields to null.
+- If no defensible transition estimate can be established, return
+  INSUFFICIENT and set all hour fields to null. An honest unknown is
+  better than a misleading number.
 - Copy the citation URL exactly from the supplied results.
 
 Return only a valid JSON object with exactly these fields:
@@ -833,38 +957,87 @@ if (
     )
 
     # --------------------------------------------------------
-    # TIME REMAINING AND REQUIRED PACE
+    # TIME REMAINING, REAL SCHEDULE CAPACITY, AND REQUIRED PACE
     # --------------------------------------------------------
 
     today = date.today()
     days_remaining = max((deadline - today).days, 0)
     weeks_remaining = days_remaining / 7
 
-    if weeks_remaining > 0:
-        low_required_pace = low_workload / weeks_remaining
-        estimate_required_pace = workload / weeks_remaining
+    # Count the actual study slots between the chosen start date and
+    # deadline. This avoids calling a plan feasible merely because
+    # weekly_hours * weeks looks sufficient when the selected study days
+    # do not provide enough sessions in the real calendar.
+    weekday_options = {
+        "Monday": 0,
+        "Tuesday": 1,
+        "Wednesday": 2,
+        "Thursday": 3,
+        "Friday": 4,
+        "Saturday": 5,
+        "Sunday": 6,
+    }
+    selected_weekdays = {
+        weekday_options[day]
+        for day in selected_days
+        if day in weekday_options
+    }
 
+    available_sessions = 0
+    if (
+        hours_per_session > 0
+        and selected_weekdays
+        and start_date <= deadline
+    ):
+        calendar_day = start_date
+        while calendar_day <= deadline:
+            if calendar_day.weekday() in selected_weekdays:
+                available_sessions += 1
+            calendar_day += timedelta(days=1)
+
+    scheduled_capacity_hours = available_sessions * hours_per_session
+    estimated_sessions_needed = (
+        int(workload // hours_per_session)
+        + (1 if workload % hours_per_session > 0.001 else 0)
+        if hours_per_session > 0
+        else 0
+    )
+    low_sessions_needed = (
+        int(low_workload // hours_per_session)
+        + (1 if low_workload % hours_per_session > 0.001 else 0)
+        if hours_per_session > 0
+        else 0
+    )
+
+    # Pace figures use the actual planned start date. A one-day plan can
+    # still contain a session, so use one-seventh of a week only for the
+    # pace display when at least one real study slot exists.
+    plan_days = max((deadline - max(start_date, today)).days, 0)
+    plan_weeks_for_pace = plan_days / 7
+    if plan_weeks_for_pace == 0 and available_sessions > 0:
+        plan_weeks_for_pace = 1 / 7
+
+    if plan_weeks_for_pace > 0:
+        low_required_pace = low_workload / plan_weeks_for_pace
+        estimate_required_pace = workload / plan_weeks_for_pace
         high_required_pace = (
             None
             if high_workload is None
-            else high_workload / weeks_remaining
+            else high_workload / plan_weeks_for_pace
         )
     else:
-        low_required_pace = float("inf")
+        low_required_pace = float("inf") if low_workload > 0 else 0.0
         estimate_required_pace = float("inf")
-        high_required_pace = None
+        high_required_pace = float("inf") if high_workload is not None else None
 
-    # --------------------------------------------------------
-    # TRAJECTORY STATUS
-    # --------------------------------------------------------
-
+    # A verdict is based on both the researched range and the actual
+    # number of sessions that fit on the selected days—not just an
+    # average-hours-per-week comparison.
     if workload <= 0:
         trajectory = "COMPLETE"
-    elif weeks_remaining <= 0:
-        trajectory = "BELOW RANGE"
-    elif weekly_hours >= estimate_required_pace:
+    elif scheduled_capacity_hours + 0.001 >= workload:
         trajectory = "ON TRACK"
-    elif weekly_hours >= low_required_pace:
+    elif low_workload > 0 and scheduled_capacity_hours + 0.001 >= low_workload:
         trajectory = "WITHIN RANGE"
     else:
         trajectory = "BELOW RANGE"
@@ -883,21 +1056,7 @@ if (
     # ACTUAL SESSION SCHEDULE
     # --------------------------------------------------------
 
-    weekday_options = {
-        "Monday": 0,
-        "Tuesday": 1,
-        "Wednesday": 2,
-        "Thursday": 3,
-        "Friday": 4,
-        "Saturday": 5,
-        "Sunday": 6,
-    }
-
-    selected_weekdays = sorted(
-        weekday_options[day]
-        for day in selected_days
-        if day in weekday_options
-    )
+    selected_weekdays = sorted(selected_weekdays)
 
     schedule = []
 
@@ -958,11 +1117,7 @@ if (
         status_title = "Behind schedule"
         status_icon = "!"
 
-    required_hours_per_week = (
-        workload / weeks_remaining
-        if weeks_remaining > 0
-        else float("inf")
-    )
+    required_hours_per_week = estimate_required_pace
 
     st.divider()
     st.caption(f"{language.upper()} · {current_level} → {target_level}")
@@ -991,28 +1146,33 @@ if (
     st.markdown("**Estimated time needed**")
 
     if weekly_hours > 0:
-        st.write(f"{weeks_at_capacity:.1f} weeks at your current pace")
+        st.write(f"{weeks_at_capacity:.1f} weeks at your current weekly-hour capacity")
     else:
         st.write("Your current pace cannot complete the workload.")
 
-    if weeks_at_capacity > 0 and weeks_remaining > 0:
+    st.caption(
+        f"Your selected days provide {available_sessions} study slots "
+        f"({scheduled_capacity_hours:g} scheduled hours) before the deadline. "
+        f"The working estimate needs about {estimated_sessions_needed} sessions."
+    )
 
-        time_coverage = min(weeks_remaining / weeks_at_capacity, 1.0)
-        st.progress(time_coverage)
-
-        if weeks_at_capacity > weeks_remaining:
-            st.caption(
-                "Your available time is shorter than the estimated time needed."
-            )
-        else:
-            st.caption(
-                "Your available time covers the working estimate."
-            )
-
-    elif trajectory == "COMPLETE":
-        st.caption("The researched workload is marked complete.")
+    if scheduled_capacity_hours + 0.001 >= workload:
+        st.progress(1.0)
+        st.caption("Your selected calendar has enough session capacity for the working estimate.")
+    elif scheduled_capacity_hours + 0.001 >= low_workload:
+        coverage = min(scheduled_capacity_hours / workload, 1.0) if workload > 0 else 1.0
+        st.progress(coverage)
+        st.caption(
+            "Your calendar covers the low end of the researched range, "
+            "but not the working estimate. Cadence labels this At risk."
+        )
     else:
-        st.caption("There is no time remaining before the deadline.")
+        coverage = min(scheduled_capacity_hours / workload, 1.0) if workload > 0 else 0.0
+        st.progress(coverage)
+        st.caption(
+            "Your selected days do not provide enough session capacity "
+            "for the researched workload before the deadline."
+        )
 
     # --------------------------------------------------------
     # NEXT MOVE
@@ -1026,24 +1186,46 @@ if (
             "reached your target level."
         )
 
-    elif weeks_remaining <= 0:
+    elif weeks_remaining <= 0 and trajectory != "ON TRACK":
         st.write(
             "Your deadline has arrived. Set a new deadline "
             "to calculate a new trajectory."
         )
 
-    elif weekly_hours >= required_hours_per_week:
+    elif trajectory == "ON TRACK":
         st.write(
-            "Keep your current study pace and review your "
-            "progress regularly."
+            "Keep your selected study days and current session duration. "
+            "Review your progress regularly; the calendar has enough "
+            "scheduled capacity for the working estimate."
+        )
+
+    elif trajectory == "WITHIN RANGE":
+        st.write(
+            f"Your calendar fits the low end of the research range, "
+            f"but not the {workload:g}-hour working estimate. Add study "
+            "sessions, lengthen sessions, or move the deadline if realistic."
         )
 
     else:
-        st.write(
-            f"To meet the {workload:g}-hour working estimate, "
-            f"aim for about {required_hours_per_week:.1f} "
-            f"study hours per week, instead of {weekly_hours:g}."
-        )
+        if available_sessions == 0:
+            st.write(
+                "No study sessions fit your selected days and date range. "
+                "Choose at least one study day, or change the start date "
+                "or deadline before treating this as a workable plan."
+            )
+        elif weekly_hours >= required_hours_per_week:
+            st.write(
+                "Your average weekly hours look sufficient, but the actual "
+                "study days do not provide enough sessions before the deadline. "
+                "Add a study day, lengthen sessions, or move the deadline."
+            )
+        else:
+            st.write(
+                f"To meet the {workload:g}-hour working estimate, "
+                f"aim for about {required_hours_per_week:.1f} "
+                f"study hours per week, instead of {weekly_hours:g}, "
+                "and check that the selected days fit enough sessions."
+            )
 
     st.caption(
         "This is an estimate based on researched workload. "
@@ -1102,8 +1284,9 @@ if (
             )
 
             st.caption(
-                f"{len(schedule)} sessions fit into the selected "
-                "schedule and date range."
+                f"Cadence placed {len(schedule)} of {estimated_sessions_needed} "
+                f"required sessions into the selected schedule. "
+                f"The calendar contains {available_sessions} possible study slots."
             )
 
             expected_sessions = int(
@@ -1119,7 +1302,9 @@ if (
 
         else:
             st.info(
-                "No sessions fit the selected study days and dates."
+                "No sessions fit the selected study days and dates. "
+                "This plan cannot be feasible unless you add study days "
+                "or change the start date/deadline."
             )
 
       # --------------------------------------------------------
@@ -1163,8 +1348,12 @@ if (
             "low_workload_hours": low_workload,
             "high_workload_hours": high_workload,
             "required_pace": (
-                workload / weeks_remaining if weeks_remaining > 0 else 0.0
+                required_hours_per_week if required_hours_per_week != float("inf") else 0.0
             ),
+            "available_sessions_at_creation": available_sessions,
+            "scheduled_capacity_hours_at_creation": scheduled_capacity_hours,
+            "estimated_sessions_needed": estimated_sessions_needed,
+            "trajectory_at_creation": trajectory,
             "selected_days": selected_days,
             "research_source": research.get("source", "Research"),
             "research_source_url": research.get("source_url", ""),
